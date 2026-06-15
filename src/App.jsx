@@ -42,12 +42,12 @@ function accuracy(error) {
   return Math.max(0, 1 - error / WINDOW); // 0..1
 }
 function band(error) {
-  if (error < ON_THE_DOT) return { sq: "🎯", label: "On the dot", color: C.cool };
-  if (error < 0.03) return { sq: "🟪", label: "Dead on", color: "#A98BFF" };
-  if (error < 0.1) return { sq: "🟩", label: "Locked in", color: "#38E2C6" };
-  if (error < 0.25) return { sq: "🟨", label: "Close", color: "#FFC24B" };
-  if (error < 0.5) return { sq: "🟧", label: "Off", color: "#FF8A3D" };
-  return { sq: "⬛", label: "Missed", color: "#5A6275" };
+  // error is the absolute miss, so this applies equally whether you were early or late
+  if (error < 0.02) return { sq: "🟩", label: "Right on the money", color: C.bandGreen };
+  if (error < 0.06) return { sq: "🟪", label: "So close", color: C.bandPurple };
+  if (error < 0.15) return { sq: "🟨", label: "Close", color: C.bandYellow };
+  if (error < 0.3) return { sq: "🟧", label: "Off", color: C.bandOrange };
+  return { sq: "⬛", label: "Way off", color: C.bandDim };
 }
 
 
@@ -69,6 +69,12 @@ const C = {
   live: "#FF5436",
   cool: "#38E2C6",
   amber: "#FFC24B",
+  // result bands (Today's run / share grid / reveal)
+  bandGreen: "#3DD68C",
+  bandPurple: "#A98BFF",
+  bandYellow: "#FFD43B",
+  bandOrange: "#FF8A3D",
+  bandDim: "#5A6275",
 };
 
 const mono = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace';
@@ -87,6 +93,7 @@ export default function OnTheDot() {
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const startRef = useRef(0);
 
   useEffect(() => {
@@ -118,7 +125,8 @@ export default function OnTheDot() {
     supabase.auth.getSession().then(({ data }) => {
       syncForUser(data?.session?.user ?? null);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") setRecoveryOpen(true);
       syncForUser(session?.user ?? null);
     });
 
@@ -155,6 +163,19 @@ export default function OnTheDot() {
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
+  };
+
+  const handleReset = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    if (error) throw error;
+  };
+
+  const handleNewPassword = async (password) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    setRecoveryOpen(false);
   };
 
   const currentTarget = practice
@@ -234,7 +255,7 @@ export default function OnTheDot() {
       onTheDot: (prev?.onTheDot ?? 0) + (counted ? 0 : dotsThisRun),
       plays: (prev?.plays ?? 0) + (counted ? 0 : 1),
       totalRounds: (prev?.totalRounds ?? 0) + (counted ? 0 : all.length),
-      history: history.slice(-30),
+      history: history.slice(-400),
     };
     setSave(next);
     setPlayedToday(true);
@@ -267,8 +288,11 @@ export default function OnTheDot() {
     : 0;
 
   const shareText = () => {
-    const grid = results.map((r) => band(r.error).sq).join("");
-    return `ON-THE-DOT — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}`;
+    const grid = results
+      .map((r) => (r.error < ON_THE_DOT ? "🎯" : band(r.error).sq))
+      .join("");
+    const link = typeof window !== "undefined" ? window.location.origin : "";
+    return `ON-THE-DOT — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}\n${link}`;
   };
 
   return (
@@ -341,9 +365,16 @@ export default function OnTheDot() {
             onClose={() => setAuthOpen(false)}
             onAuth={handleAuth}
             onOAuth={handleOAuth}
+            onReset={handleReset}
           />
         )}
         {statsOpen && <StatsModal save={save} onClose={() => setStatsOpen(false)} />}
+        {recoveryOpen && (
+          <RecoveryModal
+            onSubmit={handleNewPassword}
+            onClose={() => setRecoveryOpen(false)}
+          />
+        )}
       </div>
     </div>
   );
@@ -439,29 +470,24 @@ function GoogleIcon() {
   );
 }
 
-function AuthModal({ onClose, onAuth, onOAuth }) {
-  const [mode, setMode] = useState("signin"); // signin | signup
+function AuthModal({ onClose, onAuth, onReset }) {
+  const [mode, setMode] = useState("signin"); // signin | signup | reset
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [busyProvider, setBusyProvider] = useState(null);
+  const [sent, setSent] = useState(false);
 
-  const oauth = async (provider) => {
+  const validEmail = (em) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em);
+  const switchMode = (m) => {
+    setMode(m);
     setError("");
-    setBusyProvider(provider);
-    try {
-      await onOAuth(provider);
-    } catch {
-      setError("Couldn’t connect. Please try again.");
-      setBusyProvider(null);
-    }
+    setSent(false);
   };
-  const blocked = busy || !!busyProvider;
 
   const submit = async () => {
     const em = email.trim();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return setError("Enter a valid email address.");
+    if (!validEmail(em)) return setError("Enter a valid email address.");
     if (password.length < 6) return setError("Password must be at least 6 characters.");
     setError("");
     setBusy(true);
@@ -472,10 +498,75 @@ function AuthModal({ onClose, onAuth, onOAuth }) {
       setBusy(false);
     }
   };
-  const onKey = (e) => {
-    if (e.key === "Enter") submit();
+
+  const sendReset = async () => {
+    const em = email.trim();
+    if (!validEmail(em)) return setError("Enter a valid email address.");
+    setError("");
+    setBusy(true);
+    try {
+      await onReset(em);
+      setSent(true);
+    } catch (e) {
+      setError(e?.message || "Couldn’t send the reset email. Try again.");
+    }
+    setBusy(false);
   };
 
+  const onKey = (e) => {
+    if (e.key !== "Enter") return;
+    mode === "reset" ? sendReset() : submit();
+  };
+
+  // ----- forgot-password view -----
+  if (mode === "reset") {
+    return (
+      <Overlay onClose={onClose}>
+        <div style={S.modalTitle}>Reset password</div>
+        {sent ? (
+          <>
+            <div style={S.modalSub}>
+              If an account exists for {email.trim()}, a reset link is on its way. Check your
+              inbox (and spam), open the link, and you’ll set a new password.
+            </div>
+            <button style={{ ...S.btnPrimary, marginTop: 6 }} onClick={() => switchMode("signin")}>
+              Back to sign in
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={S.modalSub}>
+              Enter your email and we’ll send you a link to reset your password.
+            </div>
+            <input
+              style={S.input}
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={onKey}
+              autoFocus
+            />
+            {error && <div style={S.formErr}>{error}</div>}
+            <button
+              style={{ ...S.btnPrimary, marginTop: 14, opacity: busy ? 0.6 : 1 }}
+              disabled={busy}
+              onClick={sendReset}
+            >
+              {busy ? "Sending…" : "Send reset link"}
+            </button>
+            <button style={S.linkBtn} onClick={() => switchMode("signin")}>
+              Back to sign in
+            </button>
+          </>
+        )}
+      </Overlay>
+    );
+  }
+
+  // ----- sign in / sign up view -----
   return (
     <Overlay onClose={onClose}>
       <div style={S.modalTitle}>{mode === "signin" ? "Welcome back" : "Create account"}</div>
@@ -503,18 +594,21 @@ function AuthModal({ onClose, onAuth, onOAuth }) {
       />
       {error && <div style={S.formErr}>{error}</div>}
       <button
-        style={{ ...S.btnPrimary, marginTop: 14, opacity: blocked ? 0.6 : 1 }}
-        disabled={blocked}
+        style={{ ...S.btnPrimary, marginTop: 14, opacity: busy ? 0.6 : 1 }}
+        disabled={busy}
         onClick={submit}
       >
         {busy ? "One sec…" : mode === "signin" ? "Sign in" : "Create account"}
       </button>
+
+      {mode === "signin" && (
+        <button style={S.linkBtn} onClick={() => switchMode("reset")}>
+          Forgot password?
+        </button>
+      )}
       <button
-        style={S.linkBtn}
-        onClick={() => {
-          setMode((m) => (m === "signin" ? "signup" : "signin"));
-          setError("");
-        }}
+        style={{ ...S.linkBtn, marginTop: mode === "signin" ? 6 : 14 }}
+        onClick={() => switchMode(mode === "signin" ? "signup" : "signin")}
       >
         {mode === "signin" ? "New here? Create an account" : "Have an account? Sign in"}
       </button>
@@ -522,33 +616,198 @@ function AuthModal({ onClose, onAuth, onOAuth }) {
   );
 }
 
+function RecoveryModal({ onSubmit, onClose }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const submit = async () => {
+    if (password.length < 6) return setError("Password must be at least 6 characters.");
+    if (password !== confirm) return setError("Passwords don’t match.");
+    setError("");
+    setBusy(true);
+    try {
+      await onSubmit(password);
+      setDone(true);
+    } catch (e) {
+      setError(e?.message || "Couldn’t update your password. Try again.");
+      setBusy(false);
+    }
+  };
+  const onKey = (e) => {
+    if (e.key === "Enter") submit();
+  };
+
+  return (
+    <Overlay onClose={onClose}>
+      <div style={S.modalTitle}>Set a new password</div>
+      {done ? (
+        <>
+          <div style={S.modalSub}>Your password is updated and you’re signed in. All set!</div>
+          <button style={{ ...S.btnPrimary, marginTop: 6 }} onClick={onClose}>
+            Done
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={S.modalSub}>Choose a new password for your account.</div>
+          <input
+            style={S.input}
+            type="password"
+            autoComplete="new-password"
+            placeholder="New password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={onKey}
+            autoFocus
+          />
+          <input
+            style={S.input}
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm new password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            onKeyDown={onKey}
+          />
+          {error && <div style={S.formErr}>{error}</div>}
+          <button
+            style={{ ...S.btnPrimary, marginTop: 14, opacity: busy ? 0.6 : 1 }}
+            disabled={busy}
+            onClick={submit}
+          >
+            {busy ? "Saving…" : "Update password"}
+          </button>
+        </>
+      )}
+    </Overlay>
+  );
+}
+
+// Average accuracy over the last `days` calendar days, counting ONLY days actually played.
+// Days with no play simply aren't in history, so they're skipped (never counted as 0%).
+function periodAvg(history, days) {
+  if (!history || !history.length) return null;
+  const cutoff = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+  const inWin = history.filter((h) => h && h.date >= cutoff && typeof h.acc === "number");
+  if (!inWin.length) return null;
+  return Math.round(inWin.reduce((a, b) => a + b.acc, 0) / inWin.length);
+}
+
 function StatsModal({ save, onClose }) {
+  const [tab, setTab] = useState("stats");
   const s = save || {};
+  const history = s.history || [];
   const finiteOr = (v, suffix = "s") => (v != null && isFinite(v) ? `${fmt(v)}${suffix}` : "—");
+  const pct = (v) => (v == null ? "—" : `${v}%`);
+
   return (
     <Overlay onClose={onClose}>
       <div style={S.modalTitle}>Your statistics</div>
-      <div style={S.statsGrid}>
-        <MiniStat label="On the dot" value={`🎯 ${s.onTheDot ?? 0}`} hero />
-        <MiniStat label="Current streak" value={`🔥 ${s.streak ?? 0}`} />
-        <MiniStat label="Best streak" value={`🔥 ${s.longestStreak ?? 0}`} />
-        <MiniStat label="Closest ever" value={finiteOr(s.bestSingle)} />
-        <MiniStat label="Best game avg" value={finiteOr(s.best)} />
-        <MiniStat label="Games played" value={`${s.plays ?? 0}`} />
+
+      <div style={S.tabBar}>
+        <button
+          style={{ ...S.tab, ...(tab === "stats" ? S.tabActive : {}) }}
+          onClick={() => setTab("stats")}
+        >
+          Stats
+        </button>
+        <button
+          style={{ ...S.tab, ...(tab === "accuracy" ? S.tabActive : {}) }}
+          onClick={() => setTab("accuracy")}
+        >
+          Accuracy
+        </button>
       </div>
-      {s.history && s.history.length > 1 ? (
-        <div style={S.sparkWrap}>
-          <Sparkline data={s.history} />
-          <div style={S.sparkCaption}>
-            avg miss · last {s.history.length} days · lower is better
+
+      {tab === "stats" ? (
+        <>
+          <div style={S.statsGrid}>
+            <MiniStat label="On the dot" value={`🎯 ${s.onTheDot ?? 0}`} hero />
+            <MiniStat label="Current streak" value={`🔥 ${s.streak ?? 0}`} />
+            <MiniStat label="Best streak" value={`🔥 ${s.longestStreak ?? 0}`} />
+            <MiniStat label="Closest ever" value={finiteOr(s.bestSingle)} />
+            <MiniStat label="Best game avg" value={finiteOr(s.best)} />
+            <MiniStat label="Games played" value={`${s.plays ?? 0}`} />
           </div>
-        </div>
+          {history.length > 1 ? (
+            <div style={S.sparkWrap}>
+              <Sparkline data={history} />
+              <div style={S.sparkCaption}>
+                avg miss · last {history.length} days · lower is better
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...S.modalSub, marginTop: 16 }}>
+              Play a daily run to start building your history.
+            </div>
+          )}
+        </>
       ) : (
-        <div style={{ ...S.modalSub, marginTop: 16 }}>
-          Play a daily run to start building your history.
-        </div>
+        <>
+          <div style={S.statsGrid}>
+            <MiniStat label="Today" value={pct(periodAvg(history, 1))} hero />
+            <MiniStat label="This week" value={pct(periodAvg(history, 7))} />
+            <MiniStat label="This month" value={pct(periodAvg(history, 30))} />
+            <MiniStat label="This year" value={pct(periodAvg(history, 365))} />
+          </div>
+          {history.length > 1 ? (
+            <div style={S.sparkWrap}>
+              <AccuracyChart data={history} />
+              <div style={S.sparkCaption}>
+                accuracy % · last {history.length} days you played · higher is better
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...S.modalSub, marginTop: 16 }}>
+              Play a few days to see your accuracy trend. Days you don’t play aren’t counted.
+            </div>
+          )}
+        </>
       )}
     </Overlay>
+  );
+}
+
+function AccuracyChart({ data }) {
+  const vals = data.map((d) => (typeof d.acc === "number" ? d.acc : 0));
+  const W = 280,
+    H = 70,
+    n = vals.length;
+  const y = (v) => H - (v / 100) * (H - 8) - 4; // 0..100% mapped bottom..top
+  const pts = vals
+    .map((v, i) => {
+      const x = n === 1 ? 0 : (i / (n - 1)) * W;
+      return `${x.toFixed(1)},${y(v).toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg
+      width="100%"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      style={{ display: "block" }}
+    >
+      <line
+        x1="0"
+        y1={y(50)}
+        x2={W}
+        y2={y(50)}
+        stroke={C.line}
+        strokeWidth="1"
+        strokeDasharray="3 4"
+      />
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={C.cool}
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -1019,6 +1278,28 @@ const S = {
     width: "100%",
     marginBottom: 4,
   },
+  tabBar: {
+    display: "flex",
+    gap: 6,
+    width: "100%",
+    background: C.surface2,
+    border: `1px solid ${C.line}`,
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 16,
+  },
+  tab: {
+    flex: 1,
+    background: "transparent",
+    border: "none",
+    color: C.muted,
+    fontSize: 13,
+    fontWeight: 700,
+    padding: "8px 10px",
+    borderRadius: 7,
+    cursor: "pointer",
+  },
+  tabActive: { background: C.surface, color: C.text },
   googleBtn: {
     width: "100%",
     display: "flex",

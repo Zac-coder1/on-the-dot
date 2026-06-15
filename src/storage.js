@@ -60,7 +60,7 @@ export function mergeStats(a, b) {
   });
   const history = Object.values(byDate)
     .sort((x, y) => (x.date < y.date ? -1 : 1))
-    .slice(-30);
+    .slice(-400);
   const minDef = (x, y) => {
     const v = Math.min(x ?? Infinity, y ?? Infinity);
     return isFinite(v) ? v : null;
