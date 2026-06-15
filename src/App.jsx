@@ -21,17 +21,11 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 
 function makeTargets(seedStr) {
   const rng = hashStr(seedStr);
-  // five escalating rounds, all kept inside the [0.10, 10.00]s hard bounds
-  const ranges = [
-    [0.8, 2.5],
-    [1.5, 4.0],
-    [2.5, 6.0],
-    [4.0, 8.0],
-    [6.0, 10.0],
-  ];
-  return ranges.map(([lo, hi]) => {
-    const v = lo + rng() * (hi - lo);
-    return Math.round(clamp(v, 0.1, 10) * 100) / 100;
+  // Five independent, fully-random rounds across the whole [0.10, 10.00]s range.
+  // Still seeded by the date, so everyone gets the same set each day and it changes daily.
+  return Array.from({ length: ROUNDS }, () => {
+    const v = T_MIN + rng() * (T_MAX - T_MIN);
+    return Math.round(v * 100) / 100;
   });
 }
 
@@ -274,7 +268,7 @@ export default function OnTheDot() {
 
   const shareText = () => {
     const grid = results.map((r) => band(r.error).sq).join("");
-    return `On the Dot — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}`;
+    return `on-the-dot — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}`;
   };
 
   return (
@@ -366,7 +360,7 @@ function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onView
         </button>
       ) : (
         <div style={S.brand}>
-          ON&nbsp;THE&nbsp;<span style={{ color: C.live }}>DOT</span>
+          on-the-<span style={{ color: C.live }}>dot</span>
         </div>
       )}
 
@@ -767,16 +761,18 @@ function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText,
             style={{
               ...S.biasDot,
               left: `${50 + biasPct * 50}%`,
-              background: Math.abs(bias) < 0.08 ? C.cool : C.amber,
+              background: avgErr < 0.1 ? C.cool : C.amber,
             }}
           />
         </div>
         <div style={S.biasHint}>
-          {Math.abs(bias) < 0.08
-            ? "Beautifully calibrated."
+          {avgErr < 0.1
+            ? "Beautifully calibrated — dialed in today."
+            : Math.abs(bias) < 0.08
+            ? `All over the place today — early on some, late on others (off by ${fmt(avgErr)}s on average). Aim for consistency.`
             : bias < 0
-            ? `You stop ${fmt(Math.abs(bias))}s early on average — wait a beat longer.`
-            : `You stop ${fmt(bias)}s late on average — go a touch sooner.`}
+            ? `You stopped early most of the time (about ${fmt(Math.abs(bias))}s) — wait a beat longer.`
+            : `You stopped late most of the time (about ${fmt(bias)}s) — go a touch sooner.`}
         </div>
       </div>
 
