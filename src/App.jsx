@@ -268,7 +268,7 @@ export default function OnTheDot() {
 
   const shareText = () => {
     const grid = results.map((r) => band(r.error).sq).join("");
-    return `on-the-dot — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}`;
+    return `ON-THE-DOT — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}`;
   };
 
   return (
@@ -360,7 +360,7 @@ function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onView
         </button>
       ) : (
         <div style={S.brand}>
-          on-the-<span style={{ color: C.live }}>dot</span>
+          ON-THE-<span style={{ color: C.live }}>DOT</span>
         </div>
       )}
 
@@ -480,17 +480,6 @@ function AuthModal({ onClose, onAuth, onOAuth }) {
     <Overlay onClose={onClose}>
       <div style={S.modalTitle}>{mode === "signin" ? "Welcome back" : "Create account"}</div>
       <div style={S.modalSub}>Save your stats and track them across all your devices.</div>
-
-      <button style={S.googleBtn} disabled={blocked} onClick={() => oauth("google")}>
-        <GoogleIcon />
-        <span>{busyProvider === "google" ? "Connecting…" : "Continue with Google"}</span>
-      </button>
-
-      <div style={S.divider}>
-        <span style={S.dividerLine} />
-        <span style={S.dividerText}>or</span>
-        <span style={S.dividerLine} />
-      </div>
 
       <input
         style={S.input}
