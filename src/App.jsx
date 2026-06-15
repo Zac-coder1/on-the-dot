@@ -93,6 +93,7 @@ export default function OnTheDot() {
   const [user, setUser] = useState(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [accuracyOpen, setAccuracyOpen] = useState(false);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const startRef = useRef(0);
 
@@ -197,6 +198,15 @@ export default function OnTheDot() {
     setPhase("home");
   };
 
+  // Re-open today's finished run so the player can review it from the home screen.
+  const reviewToday = () => {
+    if (save?.lastRun?.date === todayKey() && save.lastRun.results?.length) {
+      setPractice(false);
+      setResults(save.lastRun.results);
+      setPhase("summary");
+    }
+  };
+
   const arm = () => {
     haptic(18);
     startRef.current = performance.now();
@@ -256,6 +266,10 @@ export default function OnTheDot() {
       plays: (prev?.plays ?? 0) + (counted ? 0 : 1),
       totalRounds: (prev?.totalRounds ?? 0) + (counted ? 0 : all.length),
       history: history.slice(-400),
+      lastRun: {
+        date: td,
+        results: all.map((r) => ({ target: r.target, stop: r.stop, error: r.error })),
+      },
     };
     setSave(next);
     setPlayedToday(true);
@@ -307,6 +321,7 @@ export default function OnTheDot() {
           onSignInClick={() => setAuthOpen(true)}
           onSignOut={signOut}
           onViewStats={() => setStatsOpen(true)}
+          onViewAccuracy={() => setAccuracyOpen(true)}
         />
 
         {phase === "home" && (
@@ -315,6 +330,7 @@ export default function OnTheDot() {
             playedToday={playedToday}
             save={save}
             onPlay={() => begin(false)}
+            onReview={reviewToday}
             onPractice={() => {
               targetsRef.current._practice = randPracticeTarget();
               begin(true);
@@ -369,6 +385,9 @@ export default function OnTheDot() {
           />
         )}
         {statsOpen && <StatsModal save={save} onClose={() => setStatsOpen(false)} />}
+        {accuracyOpen && (
+          <AccuracyModal save={save} onClose={() => setAccuracyOpen(false)} />
+        )}
         {recoveryOpen && (
           <RecoveryModal
             onSubmit={handleNewPassword}
@@ -381,7 +400,7 @@ export default function OnTheDot() {
 }
 
 // ---------------- components ----------------
-function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onViewStats }) {
+function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onViewStats, onViewAccuracy }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div style={S.header}>
@@ -421,6 +440,15 @@ function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onView
                     }}
                   >
                     View statistics
+                  </button>
+                  <button
+                    style={S.menuItem}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onViewAccuracy();
+                    }}
+                  >
+                    Accuracy
                   </button>
                   <button
                     style={{ ...S.menuItem, color: C.live }}
@@ -697,75 +725,62 @@ function periodAvg(history, days) {
 }
 
 function StatsModal({ save, onClose }) {
-  const [tab, setTab] = useState("stats");
   const s = save || {};
   const history = s.history || [];
   const finiteOr = (v, suffix = "s") => (v != null && isFinite(v) ? `${fmt(v)}${suffix}` : "—");
-  const pct = (v) => (v == null ? "—" : `${v}%`);
 
   return (
     <Overlay onClose={onClose}>
       <div style={S.modalTitle}>Your statistics</div>
-
-      <div style={S.tabBar}>
-        <button
-          style={{ ...S.tab, ...(tab === "stats" ? S.tabActive : {}) }}
-          onClick={() => setTab("stats")}
-        >
-          Stats
-        </button>
-        <button
-          style={{ ...S.tab, ...(tab === "accuracy" ? S.tabActive : {}) }}
-          onClick={() => setTab("accuracy")}
-        >
-          Accuracy
-        </button>
+      <div style={S.statsGrid}>
+        <MiniStat label="On the dot" value={`🎯 ${s.onTheDot ?? 0}`} hero />
+        <MiniStat label="Current streak" value={`🔥 ${s.streak ?? 0}`} />
+        <MiniStat label="Best streak" value={`🔥 ${s.longestStreak ?? 0}`} />
+        <MiniStat label="Closest ever" value={finiteOr(s.bestSingle)} />
+        <MiniStat label="Best game avg" value={finiteOr(s.best)} />
+        <MiniStat label="Games played" value={`${s.plays ?? 0}`} />
       </div>
-
-      {tab === "stats" ? (
-        <>
-          <div style={S.statsGrid}>
-            <MiniStat label="On the dot" value={`🎯 ${s.onTheDot ?? 0}`} hero />
-            <MiniStat label="Current streak" value={`🔥 ${s.streak ?? 0}`} />
-            <MiniStat label="Best streak" value={`🔥 ${s.longestStreak ?? 0}`} />
-            <MiniStat label="Closest ever" value={finiteOr(s.bestSingle)} />
-            <MiniStat label="Best game avg" value={finiteOr(s.best)} />
-            <MiniStat label="Games played" value={`${s.plays ?? 0}`} />
+      {history.length > 1 ? (
+        <div style={S.sparkWrap}>
+          <Sparkline data={history} />
+          <div style={S.sparkCaption}>
+            avg miss · last {history.length} days · lower is better
           </div>
-          {history.length > 1 ? (
-            <div style={S.sparkWrap}>
-              <Sparkline data={history} />
-              <div style={S.sparkCaption}>
-                avg miss · last {history.length} days · lower is better
-              </div>
-            </div>
-          ) : (
-            <div style={{ ...S.modalSub, marginTop: 16 }}>
-              Play a daily run to start building your history.
-            </div>
-          )}
-        </>
+        </div>
       ) : (
-        <>
-          <div style={S.statsGrid}>
-            <MiniStat label="Today" value={pct(periodAvg(history, 1))} hero />
-            <MiniStat label="This week" value={pct(periodAvg(history, 7))} />
-            <MiniStat label="This month" value={pct(periodAvg(history, 30))} />
-            <MiniStat label="This year" value={pct(periodAvg(history, 365))} />
+        <div style={{ ...S.modalSub, marginTop: 16 }}>
+          Play a daily run to start building your history.
+        </div>
+      )}
+    </Overlay>
+  );
+}
+
+function AccuracyModal({ save, onClose }) {
+  const s = save || {};
+  const history = s.history || [];
+  const pct = (v) => (v == null ? "—" : `${v}%`);
+
+  return (
+    <Overlay onClose={onClose}>
+      <div style={S.modalTitle}>Accuracy</div>
+      <div style={S.statsGrid}>
+        <MiniStat label="Today" value={pct(periodAvg(history, 1))} hero />
+        <MiniStat label="This week" value={pct(periodAvg(history, 7))} />
+        <MiniStat label="This month" value={pct(periodAvg(history, 30))} />
+        <MiniStat label="This year" value={pct(periodAvg(history, 365))} />
+      </div>
+      {history.length > 1 ? (
+        <div style={S.sparkWrap}>
+          <AccuracyChart data={history} />
+          <div style={S.sparkCaption}>
+            accuracy % · last {history.length} days you played · higher is better
           </div>
-          {history.length > 1 ? (
-            <div style={S.sparkWrap}>
-              <AccuracyChart data={history} />
-              <div style={S.sparkCaption}>
-                accuracy % · last {history.length} days you played · higher is better
-              </div>
-            </div>
-          ) : (
-            <div style={{ ...S.modalSub, marginTop: 16 }}>
-              Play a few days to see your accuracy trend. Days you don’t play aren’t counted.
-            </div>
-          )}
-        </>
+        </div>
+      ) : (
+        <div style={{ ...S.modalSub, marginTop: 16 }}>
+          Play a few days to see your accuracy trend. Days you don’t play aren’t counted.
+        </div>
       )}
     </Overlay>
   );
@@ -811,7 +826,8 @@ function AccuracyChart({ data }) {
   );
 }
 
-function Home({ targets, playedToday, save, onPlay, onPractice }) {
+function Home({ targets, playedToday, save, onPlay, onReview, onPractice }) {
+  const canReview = save?.lastRun?.date === todayKey() && save.lastRun.results?.length;
   return (
     <div style={S.pane}>
       <div style={S.tagline}>Stop the clock blind. As close to the target as you can.</div>
@@ -821,6 +837,9 @@ function Home({ targets, playedToday, save, onPlay, onPractice }) {
       {playedToday ? (
         <>
           <div style={S.donePill}>Daily done — back tomorrow</div>
+          {canReview && (
+            <button style={S.btnPrimary} onClick={onReview}>View today’s run</button>
+          )}
           <button style={S.btnGhost} onClick={onPractice}>Practice (unlimited)</button>
         </>
       ) : (

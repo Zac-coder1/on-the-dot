@@ -65,6 +65,11 @@ export function mergeStats(a, b) {
     const v = Math.min(x ?? Infinity, y ?? Infinity);
     return isFinite(v) ? v : null;
   };
+  const newerRun = (() => {
+    if (!a.lastRun) return b.lastRun;
+    if (!b.lastRun) return a.lastRun;
+    return (a.lastRun.date || "") >= (b.lastRun.date || "") ? a.lastRun : b.lastRun;
+  })();
   return {
     lastDate: (a.lastDate || "") > (b.lastDate || "") ? a.lastDate : b.lastDate,
     streak: Math.max(a.streak || 0, b.streak || 0),
@@ -75,5 +80,6 @@ export function mergeStats(a, b) {
     plays: Math.max(a.plays || 0, b.plays || 0),
     totalRounds: Math.max(a.totalRounds || 0, b.totalRounds || 0),
     history,
+    ...(newerRun ? { lastRun: newerRun } : {}),
   };
 }
