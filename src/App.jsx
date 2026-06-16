@@ -21,10 +21,18 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 
 function makeTargets(seedStr) {
   const rng = hashStr(seedStr);
-  // Five independent, fully-random rounds across the whole [0.10, 10.00]s range.
-  // Still seeded by the date, so everyone gets the same set each day and it changes daily.
+  // Five random rounds across [0.10, 10.00]s, seeded by the date so everyone gets the
+  // same set each day. Cap: at most 2 rounds may exceed 5s, so a session stays snappy —
+  // any extra long ones get pulled down into the 0.10–5.00s range.
+  const LONG_CUT = 5;
+  const MAX_LONG = 2;
+  let longCount = 0;
   return Array.from({ length: ROUNDS }, () => {
-    const v = T_MIN + rng() * (T_MAX - T_MIN);
+    let v = T_MIN + rng() * (T_MAX - T_MIN);
+    if (v > LONG_CUT) {
+      if (longCount < MAX_LONG) longCount++;
+      else v = T_MIN + rng() * (LONG_CUT - T_MIN); // too many long ones already
+    }
     return Math.round(v * 100) / 100;
   });
 }
@@ -903,10 +911,10 @@ function Ready({ round, practice, target, onArm }) {
         {fmt(showing ? demo : target)}
         <span style={S.unit}>s</span>
       </div>
-      <button style={S.btnDemo} onClick={runDemo}>
+      <button style={S.btnDemo} onPointerDown={runDemo}>
         {showing ? "Replay clock speed" : "Preview clock speed"}
       </button>
-      <button style={S.btnPrimary} onClick={onArm}>Start</button>
+      <button style={S.btnPrimary} onPointerDown={onArm}>Start</button>
       <div style={S.hint}>The screen goes dark and the clock runs hidden. Stop when it feels right.</div>
     </div>
   );
@@ -914,7 +922,7 @@ function Ready({ round, practice, target, onArm }) {
 
 function Running({ onStop }) {
   return (
-    <button className="otd-enter" style={S.void} onClick={onStop} aria-label="Stop the clock">
+    <button className="otd-enter" style={S.void} onPointerDown={onStop} aria-label="Stop the clock">
       <span style={S.livePill}>
         <span className="otd-pulse" style={S.liveDot} />
         TIMING
@@ -1121,7 +1129,7 @@ function Stat({ label, value }) {
 // ---------------- styles ----------------
 const S = {
   root: {
-    minHeight: "100vh",
+    minHeight: "100dvh",
     background: `radial-gradient(120% 80% at 50% -10%, #161D2C 0%, ${C.bg} 60%)`,
     display: "flex",
     alignItems: "center",
@@ -1596,7 +1604,7 @@ const css = `
   35% { opacity: 1; }
   100% { background-color: transparent; }
 }
-.otd-enter { animation: otdEnter .5s ease-out; }
+.otd-enter { animation: otdEnter .3s ease-out; }
 @keyframes otdSlide { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0);} }
 .otd-slide { animation: otdSlide .45s cubic-bezier(.2,.8,.2,1) both; }
 button:focus-visible { outline: 2px solid ${C.cool}; outline-offset: 3px; }
