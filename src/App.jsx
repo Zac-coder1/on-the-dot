@@ -58,7 +58,7 @@ function makeTargets(seedStr) {
 
 const WINDOW = 1.0; // seconds; error beyond this scores 0
 const ROUNDS = 5;
-const ON_THE_DOT = 0.01; // within one hundredth of a second counts as "on the dot"
+const ON_THE_DOT = 0.005; // must round to 0.00 — i.e. land exactly on the target
 const T_MIN = 0.1, T_MAX = 10; // hard bounds for any generated target
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const randPracticeTarget = () =>
@@ -70,8 +70,8 @@ function accuracy(error) {
 }
 function band(error) {
   // error is the absolute miss, so this applies equally whether you were early or late
-  if (error < 0.02) return { sq: "🟩", label: "Right on the money", color: C.bandGreen };
-  if (error < 0.06) return { sq: "🟪", label: "So close", color: C.bandPurple };
+  if (error < ON_THE_DOT) return { sq: "🎯", label: "On the dot", color: C.bandGreen }; // exact only
+  if (error < 0.06) return { sq: "🟪", label: "So close", color: C.bandPurple }; // 0.01–0.05
   if (error < 0.15) return { sq: "🟨", label: "Close", color: C.bandYellow };
   if (error < 0.3) return { sq: "🟧", label: "Off", color: C.bandOrange };
   return { sq: "⬛", label: "Way off", color: C.bandDim };
@@ -329,9 +329,7 @@ export default function OnTheDot() {
     : 0;
 
   const shareText = () => {
-    const grid = results
-      .map((r) => (r.error < ON_THE_DOT ? "🎯" : band(r.error).sq))
-      .join("");
+    const grid = results.map((r) => band(r.error).sq).join("");
     const link = typeof window !== "undefined" ? window.location.origin : "";
     return `ON-THE-DOT — ${todayKey()}\n${grid}\nAvg miss ${fmt(avgErr)}s · ${avgAcc}% accuracy\nStreak 🔥${save?.streak ?? 1}\n${link}`;
   };
