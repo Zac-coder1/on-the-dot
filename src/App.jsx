@@ -17,21 +17,40 @@ function hashStr(s) {
   };
 }
 
-const todayKey = () => new Date().toISOString().slice(0, 10);
+const localKey = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const todayKey = () => localKey(new Date());
+const yesterdayKey = () => localKey(new Date(Date.now() - 864e5));
+
+// Streak still counts only if the last play was today or yesterday (local); otherwise it's broken.
+function effectiveStreak(save) {
+  if (!save || !save.streak) return 0;
+  const last = save.lastDate;
+  return last === todayKey() || last === yesterdayKey() ? save.streak : 0;
+}
 
 function makeTargets(seedStr) {
   const rng = hashStr(seedStr);
-  // Five random rounds across [0.10, 10.00]s, seeded by the date so everyone gets the
-  // same set each day. Cap: at most 2 rounds may exceed 5s, so a session stays snappy —
-  // any extra long ones get pulled down into the 0.10–5.00s range.
+  // Seeded by the date so everyone gets the same set each day.
+  // Round 1 is always < 5s (quick start for new players), and at most 2 of the
+  // remaining rounds may exceed 5s so a session never drags.
   const LONG_CUT = 5;
   const MAX_LONG = 2;
   let longCount = 0;
-  return Array.from({ length: ROUNDS }, () => {
-    let v = T_MIN + rng() * (T_MAX - T_MIN);
-    if (v > LONG_CUT) {
-      if (longCount < MAX_LONG) longCount++;
-      else v = T_MIN + rng() * (LONG_CUT - T_MIN); // too many long ones already
+  return Array.from({ length: ROUNDS }, (_, i) => {
+    let v;
+    if (i === 0) {
+      v = T_MIN + rng() * (LONG_CUT - T_MIN); // first round: quick, always under 5s
+    } else {
+      v = T_MIN + rng() * (T_MAX - T_MIN);
+      if (v > LONG_CUT) {
+        if (longCount < MAX_LONG) longCount++;
+        else v = T_MIN + rng() * (LONG_CUT - T_MIN); // too many long rounds already
+      }
     }
     return Math.round(v * 100) / 100;
   });
@@ -255,7 +274,7 @@ export default function OnTheDot() {
     const bestSingleRun = Math.min(...all.map((r) => r.error));
     const td = todayKey();
     const prev = save;
-    const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    const yesterday = yesterdayKey();
     let streak = 1;
     if (prev) {
       if (prev.lastDate === td) streak = prev.streak; // already counted today
@@ -424,7 +443,7 @@ function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onView
 
       <div style={S.headerRight}>
         <div style={S.streak}>
-          🔥 <span style={{ fontFamily: mono }}>{save?.streak ?? 0}</span>
+          🔥 <span style={{ fontFamily: mono }}>{effectiveStreak(save)}</span>
         </div>
         {user ? (
           <div style={S.avatarWrap}>
@@ -726,7 +745,7 @@ function RecoveryModal({ onSubmit, onClose }) {
 // Days with no play simply aren't in history, so they're skipped (never counted as 0%).
 function periodAvg(history, days) {
   if (!history || !history.length) return null;
-  const cutoff = new Date(Date.now() - (days - 1) * 864e5).toISOString().slice(0, 10);
+  const cutoff = localKey(new Date(Date.now() - (days - 1) * 864e5));
   const inWin = history.filter((h) => h && h.date >= cutoff && typeof h.acc === "number");
   if (!inWin.length) return null;
   return Math.round(inWin.reduce((a, b) => a + b.acc, 0) / inWin.length);
@@ -736,24 +755,26 @@ function StatsModal({ save, onClose }) {
   const s = save || {};
   const history = s.history || [];
   const finiteOr = (v, suffix = "s") => (v != null && isFinite(v) ? `${fmt(v)}${suffix}` : "—");
+  const overallMiss = history.length
+    ? history.reduce((a, b) => a + (typeof b.avgErr === "number" ? b.avgErr : 0), 0) /
+      history.length
+    : null;
 
   return (
     <Overlay onClose={onClose}>
       <div style={S.modalTitle}>Your statistics</div>
       <div style={S.statsGrid}>
         <MiniStat label="On the dot" value={`🎯 ${s.onTheDot ?? 0}`} hero />
-        <MiniStat label="Current streak" value={`🔥 ${s.streak ?? 0}`} />
+        <MiniStat label="Current streak" value={`🔥 ${effectiveStreak(save)}`} />
         <MiniStat label="Best streak" value={`🔥 ${s.longestStreak ?? 0}`} />
         <MiniStat label="Closest ever" value={finiteOr(s.bestSingle)} />
-        <MiniStat label="Best game avg" value={finiteOr(s.best)} />
+        <MiniStat label="Avg miss" value={overallMiss != null ? `${fmt(overallMiss)}s` : "—"} />
         <MiniStat label="Games played" value={`${s.plays ?? 0}`} />
       </div>
       {history.length > 1 ? (
         <div style={S.sparkWrap}>
-          <Sparkline data={history} />
-          <div style={S.sparkCaption}>
-            avg miss · last {history.length} days · lower is better
-          </div>
+          <TrendChart data={history} mode="miss" />
+          <div style={S.sparkCaption}>avg miss over the days you played · higher line = better</div>
         </div>
       ) : (
         <div style={{ ...S.modalSub, marginTop: 16 }}>
@@ -768,6 +789,11 @@ function AccuracyModal({ save, onClose }) {
   const s = save || {};
   const history = s.history || [];
   const pct = (v) => (v == null ? "—" : `${v}%`);
+  const overallAcc = history.length
+    ? Math.round(
+        history.reduce((a, b) => a + (typeof b.acc === "number" ? b.acc : 0), 0) / history.length
+      )
+    : null;
 
   return (
     <Overlay onClose={onClose}>
@@ -776,14 +802,12 @@ function AccuracyModal({ save, onClose }) {
         <MiniStat label="Today" value={pct(periodAvg(history, 1))} hero />
         <MiniStat label="This week" value={pct(periodAvg(history, 7))} />
         <MiniStat label="This month" value={pct(periodAvg(history, 30))} />
-        <MiniStat label="This year" value={pct(periodAvg(history, 365))} />
+        <MiniStat label="Overall" value={pct(overallAcc)} />
       </div>
       {history.length > 1 ? (
         <div style={S.sparkWrap}>
-          <AccuracyChart data={history} />
-          <div style={S.sparkCaption}>
-            accuracy % · last {history.length} days you played · higher is better
-          </div>
+          <TrendChart data={history} mode="accuracy" />
+          <div style={S.sparkCaption}>accuracy over the days you played · higher is better</div>
         </div>
       ) : (
         <div style={{ ...S.modalSub, marginTop: 16 }}>
@@ -794,34 +818,68 @@ function AccuracyModal({ save, onClose }) {
   );
 }
 
-function AccuracyChart({ data }) {
-  const vals = data.map((d) => (typeof d.acc === "number" ? d.acc : 0));
-  const W = 280,
-    H = 70,
-    n = vals.length;
-  const y = (v) => H - (v / 100) * (H - 8) - 4; // 0..100% mapped bottom..top
-  const pts = vals
-    .map((v, i) => {
-      const x = n === 1 ? 0 : (i / (n - 1)) * W;
-      return `${x.toFixed(1)},${y(v).toFixed(1)}`;
-    })
-    .join(" ");
+function TrendChart({ data, mode }) {
+  const n = data.length;
+  const W = 300,
+    H = 100,
+    padL = 40,
+    padR = 8,
+    padT = 10,
+    padB = 20;
+  const plotW = W - padL - padR,
+    plotH = H - padT - padB;
+
+  let vals, frac, topLabel, midLabel, bottomLabel;
+  if (mode === "accuracy") {
+    vals = data.map((d) => (typeof d.acc === "number" ? d.acc : 0));
+    frac = (v) => v / 100; // 100% at top
+    topLabel = "100%";
+    midLabel = "50%";
+    bottomLabel = "0%";
+  } else {
+    vals = data.map((d) => (typeof d.avgErr === "number" ? d.avgErr : 0));
+    const maxMiss = Math.max(0.1, ...vals);
+    frac = (v) => 1 - v / maxMiss; // 0s (perfect) at top
+    topLabel = "0s";
+    midLabel = `${fmt(maxMiss / 2)}s`;
+    bottomLabel = `${fmt(maxMiss)}s`;
+  }
+  const x = (i) => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const y = (f) => padT + (1 - f) * plotH;
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(frac(v)).toFixed(1)}`).join(" ");
+  const grid = [
+    { g: 1, label: topLabel },
+    { g: 0.5, label: midLabel },
+    { g: 0, label: bottomLabel },
+  ];
+  const lastF = frac(vals[n - 1]);
+
   return (
-    <svg
-      width="100%"
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      style={{ display: "block" }}
-    >
-      <line
-        x1="0"
-        y1={y(50)}
-        x2={W}
-        y2={y(50)}
-        stroke={C.line}
-        strokeWidth="1"
-        strokeDasharray="3 4"
-      />
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      {grid.map(({ g, label }) => (
+        <g key={g}>
+          <line
+            x1={padL}
+            y1={y(g)}
+            x2={W - padR}
+            y2={y(g)}
+            stroke={C.line}
+            strokeWidth="1"
+            strokeDasharray={g === 0.5 ? "3 4" : ""}
+            opacity={g === 0.5 ? 0.9 : 0.5}
+          />
+          <text
+            x={padL - 7}
+            y={y(g) + 3}
+            textAnchor="end"
+            fontSize="9"
+            fill={C.muted}
+            fontFamily={mono}
+          >
+            {label}
+          </text>
+        </g>
+      ))}
       <polyline
         points={pts}
         fill="none"
@@ -830,6 +888,13 @@ function AccuracyChart({ data }) {
         strokeLinejoin="round"
         strokeLinecap="round"
       />
+      <circle cx={x(n - 1)} cy={y(lastF)} r="3.5" fill={C.cool} />
+      <text x={padL} y={H - 5} textAnchor="start" fontSize="9" fill={C.muted}>
+        older
+      </text>
+      <text x={W - padR} y={H - 5} textAnchor="end" fontSize="9" fill={C.muted}>
+        today
+      </text>
     </svg>
   );
 }
@@ -1000,10 +1065,13 @@ function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText,
       <div style={S.grid}>
         {results.map((r, i) => {
           const b = band(r.error);
+          const signed = r.stop - r.target; // + = late, − = early
+          const cellText =
+            r.error < 0.005 ? fmt(0) : `${signed > 0 ? "+" : "−"}${fmt(Math.abs(signed))}`;
           return (
             <div key={i} style={{ ...S.cell, borderColor: b.color }}>
-              <div style={{ fontFamily: mono, color: b.color, fontSize: 18 }}>
-                {fmt(r.error)}
+              <div style={{ fontFamily: mono, color: b.color, fontSize: 16 }}>
+                {cellText}
               </div>
               <div style={S.cellSub}>R{i + 1}</div>
             </div>
@@ -1064,10 +1132,8 @@ function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText,
           </div>
           {save.history && save.history.length > 1 && (
             <div style={S.sparkWrap}>
-              <Sparkline data={save.history} />
-              <div style={S.sparkCaption}>
-                avg miss · last {save.history.length} days · lower is better
-              </div>
+              <TrendChart data={save.history} mode="miss" />
+              <div style={S.sparkCaption}>avg miss over the days you played · higher line = better</div>
             </div>
           )}
         </div>
@@ -1087,33 +1153,6 @@ function MiniStat({ label, value, hero }) {
       <div style={{ ...S.miniVal, color: hero ? C.cool : C.text }}>{value}</div>
       <div style={S.miniLabel}>{label}</div>
     </div>
-  );
-}
-
-function Sparkline({ data }) {
-  const vals = data.map((d) => d.avgErr);
-  const max = Math.max(...vals);
-  const min = Math.min(...vals);
-  const span = max - min || 1;
-  const W = 280, H = 44, n = vals.length;
-  const pts = vals
-    .map((v, i) => {
-      const x = n === 1 ? 0 : (i / (n - 1)) * W;
-      const y = H - ((v - min) / span) * (H - 8) - 4; // lower miss = higher = better
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block" }}>
-      <polyline
-        points={pts}
-        fill="none"
-        stroke={C.cool}
-        strokeWidth="2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }
 
