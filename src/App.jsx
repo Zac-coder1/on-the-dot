@@ -349,6 +349,8 @@ export default function OnTheDot() {
           onViewAccuracy={() => setAccuracyOpen(true)}
         />
 
+        {phase === "home" && <Banner />}
+
         {phase === "home" && (
           <Home
             targets={targets}
@@ -425,6 +427,15 @@ export default function OnTheDot() {
 }
 
 // ---------------- components ----------------
+function Banner() {
+  return (
+    <div style={S.banner}>
+      🎯 <b style={{ color: C.amber }}>1M+ plays</b> · only{" "}
+      <b style={{ color: C.amber }}>4%</b> land it on the dot — can you?
+    </div>
+  );
+}
+
 function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onViewStats, onViewAccuracy }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
@@ -1207,6 +1218,17 @@ const S = {
   },
   streak: { color: C.muted, fontSize: 14, fontWeight: 700 },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
+  banner: {
+    margin: "12px 16px 0",
+    padding: "9px 15px",
+    background: "linear-gradient(90deg, rgba(255,194,75,0.14), rgba(255,84,54,0.10))",
+    border: "1px solid rgba(255,194,75,0.38)",
+    borderRadius: 999,
+    fontSize: 12.5,
+    lineHeight: 1.35,
+    textAlign: "center",
+    color: C.text,
+  },
   signInBtn: {
     background: "transparent",
     color: C.text,
