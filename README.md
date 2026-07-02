@@ -147,4 +147,3 @@ server code and are the natural "version 2." Ship this, get players, then add co
   Redirect URLs (Step E). Add it exactly, including `https://`.
 - **Stats don't save when logged in:** re-run `supabase-setup.sql` (Step A) and confirm the
   `stats` table exists under Supabase → Table Editor.
-launched

@@ -396,6 +396,8 @@ export default function OnTheDot() {
             best={save?.best}
             save={save}
             shareText={shareText()}
+            signedIn={!!user}
+            onSignIn={() => setAuthOpen(true)}
             onPractice={() => {
               targetsRef.current._practice = randPracticeTarget();
               begin(true);
@@ -421,12 +423,55 @@ export default function OnTheDot() {
             onClose={() => setRecoveryOpen(false)}
           />
         )}
+
+        {phase !== "running" && <SocialFooter />}
       </div>
     </div>
   );
 }
 
 // ---------------- components ----------------
+function SocialFooter() {
+  return (
+    <div style={S.social}>
+      <a
+        href="https://x.com/onthedot_game"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={S.socialLink}
+        aria-label="Follow ON-THE-DOT on X"
+      >
+        <XIcon />
+      </a>
+      <a
+        href="https://www.tiktok.com/@onthedot_game"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={S.socialLink}
+        aria-label="Follow ON-THE-DOT on TikTok"
+      >
+        <TikTokIcon />
+      </a>
+    </div>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.66l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+
+function TikTokIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+      <path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+    </svg>
+  );
+}
+
 function Banner() {
   return (
     <div style={S.banner}>
@@ -451,9 +496,19 @@ function Header({ save, onBack, practice, user, onSignInClick, onSignOut, onView
       )}
 
       <div style={S.headerRight}>
-        <div style={S.streak}>
-          🔥 <span style={{ fontFamily: mono }}>{effectiveStreak(save)}</span>
-        </div>
+        {user ? (
+          <div style={S.streak}>
+            🔥 <span style={{ fontFamily: mono }}>{effectiveStreak(save)}</span>
+          </div>
+        ) : (
+          <button
+            style={{ ...S.streak, background: "none", border: "none", cursor: "pointer", color: C.muted }}
+            onClick={onSignInClick}
+            title="Sign in to view your streak"
+          >
+            🔥 🔒
+          </button>
+        )}
         {user ? (
           <div style={S.avatarWrap}>
             <button
@@ -930,17 +985,6 @@ function Home({ targets, playedToday, save, onPlay, onReview, onPractice }) {
           <button style={S.btnGhost} onClick={onPractice}>Practice first</button>
         </>
       )}
-      <div style={S.hint}>Tip: tap, or press <kbd style={S.kbd}>Space</kbd> to start &amp; stop.</div>
-
-      {save && (save.plays ?? 0) > 0 && (
-        <div style={S.homeStats}>
-          <span>🎯 <b style={{ color: C.cool }}>{save.onTheDot ?? 0}</b> on the dot</span>
-          <span style={S.homeStatDiv}>·</span>
-          <span>🔥 <b>{save.longestStreak ?? save.streak ?? 0}</b> best</span>
-          <span style={S.homeStatDiv}>·</span>
-          <span><b>{save.bestSingle != null ? fmt(save.bestSingle) + "s" : "—"}</b> closest</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -990,6 +1034,7 @@ function Ready({ round, practice, target, onArm }) {
       </button>
       <button style={S.btnPrimary} onPointerDown={onArm}>Start</button>
       <div style={S.hint}>The screen goes dark and the clock runs hidden. Stop when it feels right.</div>
+      <div style={S.hint}>Tip: tap, or press <kbd style={S.kbd}>Space</kbd> to start &amp; stop.</div>
     </div>
   );
 }
@@ -1055,7 +1100,7 @@ function Reveal({ r, onNext, isLast }) {
   );
 }
 
-function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText, onPractice }) {
+function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText, onPractice, signedIn, onSignIn }) {
   const [copied, setCopied] = useState(false);
   const dotsThisRun = results.filter((r) => r.error < ON_THE_DOT).length;
   const biasPct = Math.max(-1, Math.min(1, bias / 0.5)); // clamp for meter
@@ -1097,7 +1142,7 @@ function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText,
       <div style={S.statRow}>
         <Stat label="Accuracy" value={`${avgAcc}%`} />
         <Stat label="Avg miss" value={`${fmt(avgErr)}s`} />
-        <Stat label="Streak" value={`🔥${streak}`} />
+        <Stat label="Streak" value={`🔥${streak}`} locked={!signedIn} onClick={onSignIn} />
       </div>
 
       {/* bias meter — the retention hook */}
@@ -1128,24 +1173,32 @@ function Summary({ results, avgErr, avgAcc, bias, streak, best, save, shareText,
         </div>
       </div>
 
-      {/* lifetime tracker — the come-back hook */}
-      {save && (
-        <div style={S.lifeWrap}>
-          <div style={S.lifeRow}>
-            <MiniStat label="On the dot" value={`🎯 ${save.onTheDot ?? 0}`} hero />
-            <MiniStat label="Best streak" value={`🔥 ${save.longestStreak ?? streak}`} />
-            <MiniStat
-              label="Closest ever"
-              value={save.bestSingle != null ? `${fmt(save.bestSingle)}s` : "—"}
-            />
-          </div>
-          {save.history && save.history.length > 1 && (
-            <div style={S.sparkWrap}>
-              <TrendChart data={save.history} mode="miss" />
-              <div style={S.sparkCaption}>avg miss over the days you played · higher line = better</div>
+      {/* lifetime tracker — the come-back hook (only for signed-in users) */}
+      {signedIn ? (
+        save && (
+          <div style={S.lifeWrap}>
+            <div style={S.lifeRow}>
+              <MiniStat label="On the dot" value={`🎯 ${save.onTheDot ?? 0}`} hero />
+              <MiniStat label="Best streak" value={`🔥 ${save.longestStreak ?? streak}`} />
+              <MiniStat
+                label="Closest ever"
+                value={save.bestSingle != null ? `${fmt(save.bestSingle)}s` : "—"}
+              />
             </div>
-          )}
-        </div>
+            {save.history && save.history.length > 1 && (
+              <div style={S.sparkWrap}>
+                <TrendChart data={save.history} mode="miss" />
+                <div style={S.sparkCaption}>
+                  avg miss over the days you played · higher line = better
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      ) : (
+        <button style={S.lockedPanel} onClick={onSignIn} title="Sign in to view">
+          🔒 Sign in to save your streak & track your stats
+        </button>
       )}
 
       <button style={S.btnPrimary} onClick={copy}>
@@ -1165,7 +1218,19 @@ function MiniStat({ label, value, hero }) {
   );
 }
 
-function Stat({ label, value }) {
+function Stat({ label, value, locked, onClick }) {
+  if (locked) {
+    return (
+      <button
+        style={{ ...S.stat, background: "none", border: "none", cursor: "pointer" }}
+        onClick={onClick}
+        title="Sign in to view"
+      >
+        <div style={{ fontSize: 22 }}>🔒</div>
+        <div style={S.statLabel}>{label}</div>
+      </button>
+    );
+  }
   return (
     <div style={S.stat}>
       <div style={{ fontFamily: mono, fontSize: 22, color: C.text }}>{value}</div>
@@ -1218,6 +1283,32 @@ const S = {
   },
   streak: { color: C.muted, fontSize: 14, fontWeight: 700 },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
+  lockedPanel: {
+    width: "100%",
+    margin: "4px 0 2px",
+    padding: "14px 16px",
+    background: C.surface2,
+    border: `1px dashed ${C.line}`,
+    borderRadius: 14,
+    color: C.muted,
+    fontSize: 13.5,
+    cursor: "pointer",
+    textAlign: "center",
+  },
+  social: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 22,
+    padding: "16px 0 18px",
+  },
+  socialLink: {
+    color: C.muted,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textDecoration: "none",
+  },
   banner: {
     margin: "12px 16px 0",
     padding: "9px 15px",
